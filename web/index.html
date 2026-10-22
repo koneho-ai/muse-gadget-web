@@ -36,13 +36,15 @@
   </main>
 
   <footer>
-    <form id="ask-form">
-      <input id="ask-input" type="text" placeholder="Ask Muse…" autocomplete="off">
-      <button type="submit" id="ask-button">Ask</button>
-    </form>
-    <button id="mic" title="Click to talk, click again to send">🎤</button>
-    <label class="volume">🔊 <input id="volume" type="range" min="0" max="100" value="80"></label>
-    <button id="sound-hint" hidden>Tap to enable sound</button>
+    <div class="dock">
+      <form id="ask-form">
+        <input id="ask-input" type="text" placeholder="Ask Muse…" autocomplete="off">
+        <button type="submit" id="ask-button">Ask</button>
+      </form>
+      <button id="mic" title="Click to talk, click again to send">🎤</button>
+      <label class="volume">🔊 <input id="volume" type="range" min="0" max="100" value="80"></label>
+      <button id="sound-hint" hidden>Tap to enable sound</button>
+    </div>
   </footer>
 
   <audio id="player" preload="auto"></audio>

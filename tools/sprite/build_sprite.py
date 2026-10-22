@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Hand-authored pixel-native Koneho sprite + animation frames.
 
-The character is drawn from scratch in code (shapes + hand-placed feature
-patches) at grid resolution -- NOT a downsampled photo. Every animation
-frame is a full repaint of a fixed 48x58 grid of square pixels; only cell
-colors change, the grid never moves.
+Drawn from scratch in code at grid resolution -- NOT a downsampled photo.
+Proportions measured from the character reference: a near-perfect round
+ball body (38% of height), long slim ears above it (18%), a lighter oval
+muzzle plate centred on the ball, six very long thin legs (44%), curly
+tail on the right.
+
+Every animation frame is a full repaint of a fixed 48x58 grid of square
+pixels; only cell colors change, the grid never moves.
 
 Run:  python3 tools/sprite/build_sprite.py
 Outputs: web/pixels.js, design/sprite-contact-sheet.png, design/koneho-anim.gif
@@ -14,7 +18,7 @@ import os
 from PIL import Image
 
 W, H = 48, 58          # grid
-TOP = 4                # headroom rows above the character (for hop / Zzz)
+TOP = 4                # headroom rows above the character (hop / Zzz)
 GROUND = H - 1         # feet bottom row
 
 PALETTE = {
@@ -35,6 +39,12 @@ PALETTE = {
     "M": "#4a4038",            # mouth dark
     "z": "#93a7bd",            # sleep Z blue-grey
 }
+ORDER = [".", "o", "e", "L", "F", "S", "D", "W", "r", "R", "p", "P", "k", "m", "M", "z"]
+
+# anatomy (character rows; add TOP for absolute grid rows)
+BODY_CX, BODY_CY, BODY_R = 23.5, 21, 11.5      # the round ball
+EAR_L, EAR_R = 19, 28
+EYE_L, EYE_R, EYE_Y = 20, 26, 19
 
 def new_grid():
     return [["."] * W for _ in range(H)]
@@ -54,121 +64,105 @@ def ellipse(g, cx, cy, rx, ry, fill_fn):
 def is_filled(g, x, y):
     return 0 <= x < W and 0 <= y < H and g[y][x] != "."
 
+def clone(g):
+    return [row[:] for row in g]
+
 # ---------------------------------------------------------------- character
 def draw_tail(g):
-    # curly tail: hand-written mini-map, right side of the body
+    # tight curly pompom hugging the ball's right side
     curl = [
-        "..eee....",
-        ".eLLLe...",
-        "eLSSSe...",
-        "eLS.ee...",
-        ".eSLe....",
-        "eLSe.....",
-        "eLLe.....",
-        ".ee......",
+        ".eee...",
+        "eFLFLe.",
+        "eLFLFLe",
+        "eFLFLLe",
+        "eLFLLe.",
+        ".eLLe..",
+        "..ee...",
     ]
-    ox, oy = 40, TOP + 11
+    ox, oy = 33, TOP + 15
     for j, row in enumerate(curl):
         for i, c in enumerate(row):
             if c != ".":
                 px(g, ox + i, oy + j, c)
 
 def draw_leg(g, top_x, bot_x, y0, tone_main, tone_side, paw_tone):
-    """A 2px-wide leg from y0 to the feet, drifting top_x -> bot_x."""
     y1 = GROUND - 4
     for y in range(y0, y1 + 1):
         t = (y - y0) / max(1, (y1 - y0))
         x = round(top_x + (bot_x - top_x) * t)
         px(g, x, y, tone_main)
         px(g, x + 1, y, tone_side)
-    # paw: 6 wide, 4 tall, toe notches on the front rows
     cx = bot_x + 1
     paw = [
-        ".FFFF.",
-        "FFFFFF",
-        "FFDFFD",
-        "FFFFFF",
+        ".FFF..",
+        "FFFFF.",
+        "FFDFD.",
+        "FFFFF.",
     ]
     for j, row in enumerate(paw):
         for i, c in enumerate(row):
             if c != ".":
-                px(g, cx - 3 + i, GROUND - 3 + j, c if c != "F" else paw_tone)
+                px(g, cx - 2 + i, GROUND - 3 + j, c if c != "F" else paw_tone)
 
-def draw_ear(g, cx, droop=0):
-    """Upright ear, rounded tip, orange inner. droop: tip rows lost."""
-    profile = [3, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]  # TOP .. TOP+14
+def draw_ear(g, cx):
+    """Long slim ear, rounded tip, slim orange teardrop inner."""
+    profile = [2, 3, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]   # TOP..TOP+15
     for j, wdt in enumerate(profile):
-        if j < droop:
-            continue
         y = TOP + j
         x0 = cx - wdt // 2
         for i in range(wdt):
             edge = i == 0 or i == wdt - 1
             px(g, x0 + i, y, "e" if edge else "F")
-        # inner orange, inset by 1, from 2 rows below the tip
-        if j >= 2:
+        if j >= 3:  # inner teardrop, inset 1, fur margin at the tip
             iw = wdt - 2
             ix0 = cx - iw // 2
             for i in range(iw):
-                px(g, ix0 + i, y, "R" if j >= 12 else "r")
+                px(g, ix0 + i, y, "R" if j >= 13 else "r")
 
 def body_fill(x, y, dx, dy, d2):
     if d2 < 0.30 and dx < -0.05 and dy < -0.05:
-        c = "L"                       # round top-left sheen
-    elif dy > 0.88:
-        c = "D"                       # deepest bottom
-    elif d2 > 0.62 and (dy > 0.55 or dx > 0.66):
-        c = "S"                       # rim shade (follows the curve, no flat line)
-    else:
-        c = "F"
-    return c
+        return "L"                    # round top-left sheen
+    if dy > 0.88:
+        return "D"                    # deepest bottom
+    if d2 > 0.62 and (dy > 0.55 or dx > 0.66):
+        return "S"                    # rim shade, follows the curve
+    return "F"
 
 def draw_body(g):
-    cx, cy, rx, ry = 23.5, TOP + 23, 17, 15
-    ellipse(g, cx, cy, rx, ry, body_fill)
-    # outline pass: filled pixel next to empty gets an edge tone
+    ellipse(g, BODY_CX, TOP + BODY_CY, BODY_R, BODY_R, body_fill)
     snap = [row[:] for row in g]
     for y in range(H):
         for x in range(W):
             if snap[y][x] == ".":
                 continue
-            if TOP + 7 <= y <= TOP + 39 and 4 <= x <= 44:
+            if TOP + 8 <= y <= TOP + 34 and 10 <= x <= 38:
                 for nx, ny in ((x+1, y), (x-1, y), (x, y+1), (x, y-1)):
                     if not is_filled(snap, nx, ny):
                         px(g, x, y, "o" if (ny > y or nx > x) else "e")
                         break
 
 def draw_muzzle(g):
-    cx, cy, rx, ry = 23.5, TOP + 28, 8, 7
     def fill(x, y, dx, dy, d2):
         if d2 > 0.82:
             return "F"
         if dy > 0.72:
             return "F"                # soft chin
         return "W"
-    ellipse(g, cx, cy, rx, ry, fill)
-
-EYE_L, EYE_R, EYE_Y = 19, 26, TOP + 22
+    ellipse(g, BODY_CX, TOP + BODY_CY, 5.5, 6.5, fill)
 
 def draw_eyes_open(g, dy=0, wide=False):
-    # bead eyes: solid black with the sparkle at the top-inner corner
     for ex, inner_first in ((EYE_L, False), (EYE_R, True)):
-        if wide:
-            rows = [("k", "k"), ("k", "k"), ("k", "k")]
-            spark = (0, 1 if inner_first else 0)
-        else:
-            rows = [("k", "k"), ("k", "k")]
-            spark = (0, 1 if inner_first else 0)
-        for j, row in enumerate(rows):
-            for i, c in enumerate(row):
-                px(g, ex + i, EYE_Y + dy + j - (1 if wide else 0), c)
-        px(g, ex + spark[1], EYE_Y + dy + spark[0] - (1 if wide else 0), "W")
+        rows = 3 if wide else 2
+        for j in range(rows):
+            for i in range(2):
+                px(g, ex + i, TOP + EYE_Y + dy + j - (1 if wide else 0), "k")
+        sx = ex + (1 if inner_first else 0)
+        px(g, sx, TOP + EYE_Y + dy - (1 if wide else 0), "W")
 
 def draw_eyes_closed(g):
     for ex in (EYE_L, EYE_R):
-        for i in range(2):
-            px(g, ex + i, EYE_Y, "W" if False else "F")   # clear bead
-            px(g, ex + i, EYE_Y + 1, "m")                  # lash line
+        px(g, ex, TOP + EYE_Y, "W"); px(g, ex + 1, TOP + EYE_Y, "W")
+        px(g, ex, TOP + EYE_Y + 1, "m"); px(g, ex + 1, TOP + EYE_Y + 1, "m")
 
 def draw_nose(g):
     heart = [
@@ -180,28 +174,26 @@ def draw_nose(g):
     for j, row in enumerate(heart):
         for i, c in enumerate(row):
             if c != ".":
-                px(g, 21 + i, TOP + 25 + j, c)
+                px(g, 21 + i, TOP + 22 + j, c)
 
 def draw_smile(g):
-    pts = [(18, 28), (27, 28), (19, 29), (26, 29),
-           (20, 30), (25, 30), (21, 31), (22, 31), (23, 31), (24, 31)]
+    pts = [(20, 25), (27, 25), (21, 26), (26, 26),
+           (22, 27), (23, 27), (24, 27), (25, 27)]
     for x, y in pts:
         px(g, x, TOP + y, "m")
 
 def build_base():
     g = new_grid()
     draw_tail(g)
-    # back + mid legs (behind body)
-    draw_leg(g, 13, 9, TOP + 32, "S", "D", "S")
-    draw_leg(g, 34, 38, TOP + 32, "S", "D", "S")
-    draw_leg(g, 17, 14, TOP + 33, "F", "S", "F")
-    draw_leg(g, 30, 33, TOP + 33, "F", "S", "F")
-    draw_ear(g, 17)
-    draw_ear(g, 30)
+    draw_leg(g, 15, 7, TOP + 27, "S", "D", "S")    # back pair
+    draw_leg(g, 32, 39, TOP + 27, "S", "D", "S")
+    draw_leg(g, 19, 13, TOP + 28, "F", "S", "F")   # mid pair
+    draw_leg(g, 28, 33, TOP + 28, "F", "S", "F")
+    draw_ear(g, EAR_L)
+    draw_ear(g, EAR_R)
     draw_body(g)
-    # front legs (emerge from under the body)
-    draw_leg(g, 21, 20, TOP + 36, "F", "S", "F")
-    draw_leg(g, 26, 27, TOP + 36, "F", "S", "F")
+    draw_leg(g, 22, 19, TOP + 30, "F", "S", "F")   # front pair
+    draw_leg(g, 25, 26, TOP + 30, "F", "S", "F")
     draw_muzzle(g)
     draw_eyes_open(g)
     draw_nose(g)
@@ -209,21 +201,15 @@ def build_base():
     return g
 
 # ---------------------------------------------------------------- variants
-def clone(g):
-    return [row[:] for row in g]
-
 def clear_mouth(g):
-    for y in range(TOP + 28, TOP + 32):
-        for x in range(18, 29):
+    for y in range(TOP + 25, TOP + 29):
+        for x in range(19, 29):
             if g[y][x] == "m":
                 g[y][x] = "W"
 
 def frame_blink(base):
     g = clone(base)
-    # closed lashes over the muzzle
-    for ex in (EYE_L, EYE_R):
-        px(g, ex, EYE_Y, "W"); px(g, ex + 1, EYE_Y, "W")
-        px(g, ex, EYE_Y + 1, "m"); px(g, ex + 1, EYE_Y + 1, "m")
+    draw_eyes_closed(g)
     return g
 
 def frame_talk(base, size):
@@ -231,10 +217,10 @@ def frame_talk(base, size):
     clear_mouth(g)
     if size == 1:
         patch = [".MM.", "MMMM"]
-        ox, oy = 22, TOP + 30
+        ox, oy = 22, TOP + 27
     else:
-        patch = [".MMM.", "MMMMM", "MMpMM", ".MMM."]
-        ox, oy = 21, TOP + 29
+        patch = [".MMM.", "MMMMM", ".MpM."]
+        ox, oy = 21, TOP + 26
     for j, row in enumerate(patch):
         for i, c in enumerate(row):
             if c != ".":
@@ -243,18 +229,16 @@ def frame_talk(base, size):
 
 def frame_think(base, dots):
     g = clone(base)
-    # eyes look up
-    for ex in (EYE_L, EYE_R):
+    for ex in (EYE_L, EYE_R):  # eyes look up
         for j in range(2):
             for i in range(2):
-                px(g, ex + i, EYE_Y + j, "W")
-        px(g, ex, EYE_Y - 1, "k"); px(g, ex + 1, EYE_Y - 1, "k")
-        px(g, ex, EYE_Y, "k"); px(g, ex + 1, EYE_Y, "W")
-    # thought dots rising on the right
-    spots = [(38, TOP + 2), (41, TOP - 1), (44, TOP - 3)]
+                px(g, ex + i, TOP + EYE_Y + j, "W")
+        px(g, ex, TOP + EYE_Y - 1, "k"); px(g, ex + 1, TOP + EYE_Y - 1, "k")
+        px(g, ex, TOP + EYE_Y, "k"); px(g, ex + 1, TOP + EYE_Y, "W")
+    spots = [(34, TOP + 3), (37, TOP + 1), (40, TOP - 1)]
     for i in range(dots):
         x, y = spots[i]
-        r = i + 1
+        r = 1 if i < 2 else 2
         for dy in range(-r, r + 1):
             for dx in range(-r, r + 1):
                 if dx * dx + dy * dy <= r * r:
@@ -263,16 +247,14 @@ def frame_think(base, dots):
 
 def frame_listen(base):
     g = clone(base)
-    # perked ears: one extra tip row
-    for cx in (17, 30):
+    for cx in (EAR_L, EAR_R):  # one extra perked tip row
         px(g, cx - 1, TOP - 1, "e"); px(g, cx, TOP - 1, "F"); px(g, cx + 1, TOP - 1, "e")
     draw_eyes_open(g, wide=True)
     return g
 
 def frame_breathe(base):
     g = clone(base)
-    # belly shading softens, chin shade warms: pure color change, no motion
-    for y in range(TOP + 30, TOP + 39):
+    for y in range(TOP + 26, TOP + 34):
         for x in range(W):
             if g[y][x] == "D":
                 g[y][x] = "S"
@@ -281,14 +263,12 @@ def frame_breathe(base):
     return g
 
 def squash(base, drop_rows, widen=True):
-    """Compress toward the ground: remove body rows, feet stay planted."""
-    g = clone(base)
     rows = sorted(drop_rows)
-    out = [["."] * W for _ in range(len(rows))] + \
-          [g[y] for y in range(H) if y not in rows]
-    g = out[:H]
+    g = [["."] * W for _ in range(len(rows))] + \
+        [base[y] for y in range(H) if y not in rows]
+    g = [row[:] for row in g[:H]]
     if widen:
-        for y in range(TOP + 14, TOP + 30):
+        for y in range(TOP + 13, TOP + 28):
             xs = [x for x in range(W) if g[y][x] != "."]
             if xs:
                 if g[y][min(xs)] in "FSDeLo":
@@ -297,38 +277,26 @@ def squash(base, drop_rows, widen=True):
                     px(g, max(xs) + 1, y, "S")
     return g
 
-def shift_up(base, n, ear_droop=0, point_feet=False):
-    g = [["."] * W for _ in range(n)] + [row[:] for row in base[:H - n]] \
-        if n <= 0 else [row[:] for row in base[n:]] + [["."] * W for _ in range(n)]
-    # NOTE: shifting the raster up = re-anchoring; feet leave the ground.
+def shift_up(base, n, ear_droop=0):
     g = [row[:] for row in base[n:]] + [["."] * W for _ in range(n)]
     if ear_droop:
-        # redraw ears drooped: tips fold down by repainting tip rows as fur
-        for cx in (17, 30):
+        for cx in (EAR_L, EAR_R):
             for j in range(ear_droop):
                 y = TOP - n + j
                 for x in range(cx - 2, cx + 3):
                     if 0 <= y < H and g[y][x] in "FErR":
                         g[y][x] = "F" if j else "."
-    if point_feet:
-        # toes point down: trim paw sides on the lowest rows
-        for y in (GROUND - n - 1, GROUND - n):
-            for x in range(W):
-                pass
     return g
 
 def frame_sleep(base, stage):
     g = clone(base)
-    for ex in (EYE_L, EYE_R):
-        px(g, ex, EYE_Y, "W"); px(g, ex + 1, EYE_Y, "W")
-        px(g, ex, EYE_Y + 1, "m"); px(g, ex + 1, EYE_Y + 1, "m")
+    draw_eyes_closed(g)
     clear_mouth(g)
-    px(g, 23, TOP + 30, "M"); px(g, 24, TOP + 30, "M")
-    px(g, 23, TOP + 31, "M"); px(g, 24, TOP + 31, "M")
-    # Z letter, growing + rising per stage
-    zmap = {0: (["zz.", ".z.", ".zz"], 37, TOP + 6),
-            1: (["zzzz", "..z.", ".z..", "zzzz"], 39, TOP + 3),
-            2: (["zzzzz", "...z.", "..z..", ".z...", "zzzzz"], 41, TOP - 1)}
+    px(g, 23, TOP + 27, "M"); px(g, 24, TOP + 27, "M")
+    px(g, 23, TOP + 28, "M"); px(g, 24, TOP + 28, "M")
+    zmap = {0: (["zz.", ".z.", ".zz"], 33, TOP + 5),
+            1: (["zzzz", "..z.", ".z..", "zzzz"], 35, TOP + 2),
+            2: (["zzzzz", "...z.", "..z..", ".z...", "zzzzz"], 37, TOP - 1)}
     rows, ox, oy = zmap[stage]
     for j, row in enumerate(rows):
         for i, c in enumerate(row):
@@ -362,8 +330,8 @@ def main():
         "think2": frame_think(base, 2),
         "think3": frame_think(base, 3),
         "listen": frame_listen(base),
-        "squash": squash(base, [TOP + 19, TOP + 28]),
-        "squash_deep": squash(base, [TOP + 17, TOP + 24, TOP + 30]),
+        "squash": squash(base, [TOP + 16, TOP + 24]),
+        "squash_deep": squash(base, [TOP + 14, TOP + 20, TOP + 26]),
         "air": shift_up(base, 4, ear_droop=2),
         "fall": shift_up(base, 2, ear_droop=0),
         "sleep0": frame_sleep(base, 0),
@@ -373,7 +341,6 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.abspath(os.path.join(here, "..", ".."))
 
-    # contact sheet
     names = list(frames)
     cols = 4
     rows_n = (len(names) + cols - 1) // cols
@@ -384,7 +351,6 @@ def main():
         sheet.paste(im, ((i % cols) * cell_w + 6, (i // cols) * cell_h + 6))
     sheet.save(os.path.join(root, "design", "sprite-contact-sheet.png"))
 
-    # animated GIF: idle (breathe+blink) -> talk -> think -> hop -> sleep
     seq = []
     def add(name, ms):
         seq.append((render(frames[name], 7), ms))
@@ -401,11 +367,8 @@ def main():
     imgs[0].save(os.path.join(root, "design", "koneho-anim.gif"), save_all=True,
                  append_images=imgs[1:], duration=[s[1] for s in seq], loop=0)
 
-    # pixels.js for the web player
-    palette_js = [PALETTE[c] for c in
-                  [".", "o", "e", "L", "F", "S", "D", "W", "r", "R", "p", "P", "k", "m", "M", "z"]]
-    order = [".", "o", "e", "L", "F", "S", "D", "W", "r", "R", "p", "P", "k", "m", "M", "z"]
-    idx_of = {c: i for i, c in enumerate(order)}
+    palette_js = [PALETTE[c] for c in ORDER]
+    idx_of = {c: i for i, c in enumerate(ORDER)}
     frames_js = {}
     for name, g in frames.items():
         frames_js[name] = ["".join(str(idx_of[c]) if idx_of[c] < 10 else chr(87 + idx_of[c]) for c in row) for row in g]
@@ -415,7 +378,7 @@ def main():
               {"width": W, "height": H, "palette": palette_js, "frames": frames_js}) + ";\n")
     with open(os.path.join(root, "web", "pixels.js"), "w") as f:
         f.write(js)
-    print("frames:", len(frames), "| palette:", len(palette_js), "| sheet + gif + pixels.js written")
+    print("frames:", len(frames), "| sheet + gif + pixels.js written")
 
 if __name__ == "__main__":
     main()
