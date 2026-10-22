@@ -38,7 +38,7 @@ from webgadget.screen import ScreenState
 from webgadget.voice import VoiceBridge
 
 SID = "3f6f1b2c-0000-5000-8000-000000000001"  # UUID-shaped, like real chat ids
-CANONICAL_SID = "9c9c9c9c-1111-4000-8000-000000000002"  # the id the server assigns
+CANONICAL_SID = SID  # the server honours the requested id (observed live)
 
 
 class FakeSession:
@@ -50,8 +50,6 @@ class FakeSession:
 
     async def send_chat(self, message, session_id=None, *, output_modality=None):
         self.sent.append((message, session_id, output_modality))
-        # The server starts the chat under its own canonical session id,
-        # which differs from the requested one.
         return {"ok": True, "status": 200,
                 "response": {"message_id": "u1", "session_id": CANONICAL_SID}}
 
@@ -87,5 +85,5 @@ def test_turn_uses_dedicated_side_chat():
     assert result["reply"] == "Hello there"
     assert result["audio_id"] is not None
     assert session.sent == [("hi", SID, "voice")]
-    # The subscription opens unfiltered; the turn adopts the canonical id.
-    assert session.subscribed_with is None
+    # The subscription is scoped to the gadget's dedicated chat.
+    assert session.subscribed_with == SID

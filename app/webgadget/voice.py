@@ -23,6 +23,7 @@ from .screen import ScreenState
 log = logging.getLogger(__name__)
 
 TURN_TIMEOUT_S = 240
+QUIET_GRACE_S = 30
 
 
 def _ack_body(response: dict) -> dict | None:
@@ -111,9 +112,21 @@ class VoiceBridge:
                 self._apply(turn.acknowledge(body))
                 log.info("chat turn bound: requested session %s, canonical %s",
                          self._chat_session_id, turn.session_id)
-                deadline = time.monotonic() + TURN_TIMEOUT_S
-                while not turn.complete(time.monotonic()):
-                    if time.monotonic() > deadline:
+                acked_at = time.monotonic()
+                deadline = acked_at + TURN_TIMEOUT_S
+                while True:
+                    now = time.monotonic()
+                    # MuseTurn's quiet-period completion assumes events
+                    # are already flowing; a side-chat agent can take
+                    # longer than the quiet period to produce its first
+                    # event, so quiet alone only counts after a grace
+                    # period — a finished task or a real reply ends the
+                    # turn immediately.
+                    if turn.complete(now) and (
+                            turn.task_finished or turn.replies
+                            or now - acked_at > QUIET_GRACE_S):
+                        break
+                    if now > deadline:
                         return {"ok": False, "error": "timed out waiting for the reply"}
                     await asyncio.sleep(0.25)
             finally:
@@ -138,10 +151,11 @@ class VoiceBridge:
 
     async def _pump(self, session: LinkSession, turn: MuseTurn) -> None:
         try:
-            # Unfiltered on purpose: the subscription opens before the
-            # acknowledgement names the canonical chat session, and the
-            # turn itself filters events to that session once bound.
-            async for event in session.subscribe_chat():
+            # Scoped to the gadget's chat: an unfiltered subscription
+            # streams the main chat and never delivers the side chat's
+            # events (observed live — the turn starved). The server
+            # honours the requested session id as the canonical one.
+            async for event in session.subscribe_chat(self._chat_session_id):
                 self._apply(turn.feed(event))
         except asyncio.CancelledError:
             raise
