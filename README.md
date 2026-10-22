@@ -54,9 +54,12 @@ touches Bluetooth. Your options, from `docs/bluetooth.md`:
 
 1. **Pair profile** (Linux Docker host with Bluetooth):
    `docker compose --profile pair up pair`
-2. **Pair on any Bluetooth host** (Docker Desktop, etc.):
-   `tools/pair-on-host.sh`, then run the container with the same
-   `state/` directory.
+2. **Pair on a Linux Bluetooth host**: `tools/pair-on-host.sh` (the
+   SDK's BLE server is BlueZ/D-Bus code, so native pairing is
+   Linux-only), then run the container with the same `state/`
+   directory. **macOS/Windows Docker Desktop cannot pair natively** —
+   its VM has no Bluetooth to pass through; use the relay (3) or run
+   the container on a Linux Bluetooth host instead.
 3. **BLE relay**: run `tools/ble_relay.py` on any Bluetooth-capable Linux
    machine on the LAN; it relays the GATT conversation to the
    container's own pairing controller over a WebSocket. The relay holds

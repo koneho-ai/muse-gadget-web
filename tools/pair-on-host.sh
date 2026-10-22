@@ -4,8 +4,11 @@
 # the Docker host: pair here once, then run the container anywhere with
 # the same ./state directory. See docs/bluetooth.md.
 #
-# Needs on this host: python3 with cryptography + websockets, and (on
-# Linux) BlueZ running with dbus/gi available to python3.
+# Linux only: the SDK's BLE pairing server is BlueZ/D-Bus code. macOS
+# and Windows cannot run this (no BlueZ; Docker Desktop's VM has no
+# Bluetooth either) — use the BLE relay instead (docs/bluetooth.md).
+# Needs on this host: python3 with cryptography + websockets, and
+# BlueZ running with dbus/gi available to python3.
 set -eu
 cd "$(dirname "$0")/.."
 export MUSEGADGET_STATE_DIR="${MUSEGADGET_STATE_DIR:-$PWD/state}"

@@ -40,9 +40,12 @@ Pairing state is portable files (`identity.json`, `pairing.json`, mode
 - `docker compose --profile pair up pair` — one-shot pairing container
   using the host's BlueZ via its system D-Bus socket (Linux Docker hosts
   with Bluetooth), **or**
-- `tools/pair-on-host.sh` — runs the same SDK pairing natively on any
-  Bluetooth-capable host against `./state` (for Docker Desktop on
-  macOS/Windows, which cannot pass Bluetooth through), **or**
+- `tools/pair-on-host.sh` — runs the same SDK pairing natively on a
+  Bluetooth-capable **Linux** host against `./state`. Not macOS or
+  Windows: the SDK's BLE server is BlueZ/D-Bus code, and Docker
+  Desktop's VM has no Bluetooth to pass through in the first place —
+  on those hosts use the relay in section 2, or run the gadget
+  container on a Linux Bluetooth host instead, **or**
 - pair on any machine, then copy the state directory/volume to the
   Docker host.
 
