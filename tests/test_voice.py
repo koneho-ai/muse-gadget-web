@@ -38,6 +38,7 @@ from webgadget.screen import ScreenState
 from webgadget.voice import VoiceBridge
 
 SID = "3f6f1b2c-0000-5000-8000-000000000001"  # UUID-shaped, like real chat ids
+CANONICAL_SID = "9c9c9c9c-1111-4000-8000-000000000002"  # the id the server assigns
 
 
 class FakeSession:
@@ -45,24 +46,26 @@ class FakeSession:
 
     def __init__(self):
         self.sent = []
-        self.subscribed_with = None
+        self.subscribed_with = "unset"
 
     async def send_chat(self, message, session_id=None, *, output_modality=None):
         self.sent.append((message, session_id, output_modality))
+        # The server starts the chat under its own canonical session id,
+        # which differs from the requested one.
         return {"ok": True, "status": 200,
-                "response": {"message_id": "u1", "session_id": SID}}
+                "response": {"message_id": "u1", "session_id": CANONICAL_SID}}
 
     async def subscribe_chat(self, session_id=None):
         self.subscribed_with = session_id
         events = [
             {"type": "event", "event": "delta.message_start",
-             "payload": {"session_id": SID, "message_id": "a1", "reply_to_message_id": "u1"}},
+             "payload": {"session_id": CANONICAL_SID, "message_id": "a1", "reply_to_message_id": "u1"}},
             {"type": "event", "event": "delta.text_append",
-             "payload": {"session_id": SID, "message_id": "a1", "text": "Hello there"}},
+             "payload": {"session_id": CANONICAL_SID, "message_id": "a1", "text": "Hello there"}},
             {"type": "event", "event": "delta.message_done",
-             "payload": {"session_id": SID, "message_id": "a1"}},
+             "payload": {"session_id": CANONICAL_SID, "message_id": "a1"}},
             {"type": "event", "event": "task.status",
-             "payload": {"session_id": SID, "status": "completed", "reply_to_message_id": "u1"}},
+             "payload": {"session_id": CANONICAL_SID, "status": "completed", "reply_to_message_id": "u1"}},
         ]
         for event in events:
             yield event
@@ -84,4 +87,5 @@ def test_turn_uses_dedicated_side_chat():
     assert result["reply"] == "Hello there"
     assert result["audio_id"] is not None
     assert session.sent == [("hi", SID, "voice")]
-    assert session.subscribed_with == SID
+    # The subscription opens unfiltered; the turn adopts the canonical id.
+    assert session.subscribed_with is None

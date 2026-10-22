@@ -87,7 +87,12 @@ class VoiceBridge:
             return {"ok": False, "error": "a voice turn is already in progress"}
         async with self._busy:
             session = self._session()
-            turn = MuseTurn(session_id=self._chat_session_id)
+            # No preset session on the turn: the acknowledgement carries
+            # the chat's canonical session id (the server may assign its
+            # own when the requested id starts a new chat), and the turn
+            # adopts it. Presetting ours made feed() drop every reply
+            # event when the two differed.
+            turn = MuseTurn()
             self._screen.set_status("thinking")
             pump = asyncio.ensure_future(self._pump(session, turn))
             try:
@@ -104,6 +109,8 @@ class VoiceBridge:
                 if body is None:
                     return {"ok": False, "error": "Muse returned an unreadable acknowledgement"}
                 self._apply(turn.acknowledge(body))
+                log.info("chat turn bound: requested session %s, canonical %s",
+                         self._chat_session_id, turn.session_id)
                 deadline = time.monotonic() + TURN_TIMEOUT_S
                 while not turn.complete(time.monotonic()):
                     if time.monotonic() > deadline:
@@ -113,6 +120,9 @@ class VoiceBridge:
                 pump.cancel()
             replies = [r for r in turn.replies.values() if r.text]
             reply = replies[-1] if replies else None
+            if reply is None:
+                log.warning("chat turn ended without a reply (session %s)", turn.session_id)
+                return {"ok": False, "error": "Muse finished without a reply"}
             audio_id = None
             if reply is not None:
                 self._screen.set_reply(reply.text, "")
@@ -128,7 +138,10 @@ class VoiceBridge:
 
     async def _pump(self, session: LinkSession, turn: MuseTurn) -> None:
         try:
-            async for event in session.subscribe_chat(self._chat_session_id):
+            # Unfiltered on purpose: the subscription opens before the
+            # acknowledgement names the canonical chat session, and the
+            # turn itself filters events to that session once bound.
+            async for event in session.subscribe_chat():
                 self._apply(turn.feed(event))
         except asyncio.CancelledError:
             raise
