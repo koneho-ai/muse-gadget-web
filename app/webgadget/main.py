@@ -23,6 +23,20 @@ from .voice import VoiceBridge
 log = logging.getLogger("webgadget")
 
 
+def _ensure_ca_bundle() -> None:
+    """Point OpenSSL at certifi's CA bundle when the platform default is
+    missing or empty. macOS framework Pythons ship with no CA store wired
+    into ssl ("unable to get local issuer certificate"); Debian in the
+    container is unaffected. No-op when SSL_CERT_FILE is already set."""
+    if os.environ.get("SSL_CERT_FILE"):
+        return
+    try:
+        import certifi
+    except ImportError:
+        return
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+
+
 def _sdk_token() -> str | None:
     try:
         return config.sdk_token()
@@ -49,6 +63,7 @@ async def amain() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    _ensure_ca_bundle()
     port = int(os.environ.get("WEB_PORT", "8321"))
     display_name = os.environ.get("DISPLAY_NAME", "Muse Gadget (Web)")
     ident = identity.load_or_create()
