@@ -76,7 +76,12 @@ async def amain() -> None:
         sdk_token=_sdk_token(),
         display_name=display_name,
     )
-    voice = VoiceBridge(lambda: service.current_session, screen)
+    # All gadget chat goes to one dedicated side chat, named after the
+    # node so it is stable across restarts and state wipes.
+    voice = VoiceBridge(
+        lambda: service.current_session, screen,
+        chat_session_id=f"gadget-{ident.node_id}",
+    )
     server = WebGadgetServer(
         screen=screen, executor=executor, voice=voice, identity=ident, port=port,
     )

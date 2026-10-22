@@ -17,7 +17,7 @@ from pathlib import Path
 from musegadget import config
 
 from . import __version__
-from .fetch import fetch_image
+from .fetch import fetch_audio, fetch_image
 from .screen import ScreenState
 
 log = logging.getLogger(__name__)
@@ -51,6 +51,34 @@ COMMAND_SPECS = {
         "required": {},
         "optional": {},
         "timeout_ms": 30000,
+    },
+    "display.show_text": {
+        "description": (
+            "Show a text message on the gadget's browser page, in the "
+            "speech bubble under the character. Use it to reach the user "
+            "proactively — a note, a reminder, a headline — without them "
+            "asking anything first. The text stays until the next reply "
+            "or message replaces it."
+        ),
+        "required": {
+            "text": {"type": "string", "description": "The message to show (plain text, up to 2000 characters)."},
+        },
+        "optional": {},
+        "timeout_ms": 30000,
+    },
+    "voice.play_url": {
+        "description": (
+            "Download an audio file (MP3, M4A/AAC, WAV, OGG or WebM) and "
+            "play it on the gadget's browser page — a voice note, a song, "
+            "an alert sound. The gadget fetches the URL itself. Note: a "
+            "browser that has never been interacted with may hold the "
+            "playback until the user taps the page once."
+        ),
+        "required": {
+            "url": {"type": "string", "description": "http:// or https:// URL of the audio file."},
+        },
+        "optional": {},
+        "timeout_ms": 60000,
     },
     "voice.configure": {
         "description": (
@@ -127,6 +155,21 @@ class DisplayExecutor:
             if command == "display.show_animation":
                 self.screen.show_animation()
                 return ok({})
+            if command == "display.show_text":
+                text = params.get("text")
+                if not isinstance(text, str) or not text.strip():
+                    return error("text is required")
+                if len(text) > 2000:
+                    return error("text is longer than 2000 characters")
+                self.screen.set_reply(text.strip())
+                return ok({"shown": len(text.strip())})
+            if command == "voice.play_url":
+                url = params.get("url")
+                if not isinstance(url, str) or not url:
+                    return error("url is required")
+                data, mime = fetch_audio(url)
+                audio_id = self.screen.put_audio(data, mime)
+                return ok({"bytes": len(data), "format": mime.rsplit("/", 1)[-1], "audio_id": audio_id})
             if command == "voice.configure":
                 volume = params.get("volume")
                 if volume is None:

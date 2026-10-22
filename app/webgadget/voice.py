@@ -37,10 +37,14 @@ def _ack_body(response: dict) -> dict | None:
 
 
 class VoiceBridge:
-    def __init__(self, session_getter: Callable[[], LinkSession | None], screen: ScreenState) -> None:
+    def __init__(self, session_getter: Callable[[], LinkSession | None], screen: ScreenState,
+                 chat_session_id: str | None = None) -> None:
         self._session_getter = session_getter
         self._screen = screen
         self._busy = asyncio.Lock()
+        # The gadget's dedicated side chat: every turn goes to this session
+        # id (an unseen id starts the chat), never to the user's main chat.
+        self._chat_session_id = chat_session_id
 
     def _session(self) -> LinkSession:
         session = self._session_getter()
@@ -50,13 +54,13 @@ class VoiceBridge:
 
     async def say_text(self, message: str) -> dict:
         async def sender(session: LinkSession) -> dict:
-            return await session.send_chat(message, output_modality="voice")
+            return await session.send_chat(message, self._chat_session_id, output_modality="voice")
 
         return await self._run_turn(sender)
 
     async def say_voice(self, wav_bytes: bytes) -> dict:
         async def sender(session: LinkSession) -> dict:
-            return await session.send_voice(wav_bytes, output_modality="voice")
+            return await session.send_voice(wav_bytes, self._chat_session_id, output_modality="voice")
 
         return await self._run_turn(sender)
 
@@ -65,7 +69,7 @@ class VoiceBridge:
             return {"ok": False, "error": "a voice turn is already in progress"}
         async with self._busy:
             session = self._session()
-            turn = MuseTurn()
+            turn = MuseTurn(session_id=self._chat_session_id)
             self._screen.set_status("thinking")
             pump = asyncio.ensure_future(self._pump(session, turn))
             try:
@@ -77,7 +81,7 @@ class VoiceBridge:
                     return {"ok": False, "error": "Muse returned an unreadable acknowledgement"}
                 self._apply(turn.acknowledge(body))
                 deadline = time.monotonic() + TURN_TIMEOUT_S
-                while not turn.complete(time.time()):
+                while not turn.complete(time.monotonic()):
                     if time.monotonic() > deadline:
                         return {"ok": False, "error": "timed out waiting for the reply"}
                     await asyncio.sleep(0.25)
@@ -100,7 +104,7 @@ class VoiceBridge:
 
     async def _pump(self, session: LinkSession, turn: MuseTurn) -> None:
         try:
-            async for event in session.subscribe_chat():
+            async for event in session.subscribe_chat(self._chat_session_id):
                 self._apply(turn.feed(event))
         except asyncio.CancelledError:
             raise

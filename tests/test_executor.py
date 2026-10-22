@@ -75,3 +75,28 @@ def test_unknown_command(state_dir):
     result = ex.run("system.run", {"command": "id"})
     assert result["ok"] is False
     assert "unsupported" in result["error"]
+
+
+def test_show_text(state_dir):
+    screen = ScreenState()
+    ex = DisplayExecutor(screen)
+    result = ex.run("display.show_text", {"text": "  Dinner at 7!  "})
+    assert result["ok"] is True
+    assert screen.reply_text == "Dinner at 7!"
+    assert ex.run("display.show_text", {})["ok"] is False
+    assert ex.run("display.show_text", {"text": "   "})["ok"] is False
+    assert ex.run("display.show_text", {"text": "x" * 2001})["ok"] is False
+
+
+def test_play_url(state_dir, monkeypatch):
+    import webgadget.executor as executor_mod
+    monkeypatch.setattr(
+        executor_mod, "fetch_audio",
+        lambda url: (b"ID3-fake-mp3", "audio/mpeg"),
+    )
+    screen = ScreenState()
+    ex = DisplayExecutor(screen)
+    result = ex.run("voice.play_url", {"url": "https://example.com/note.mp3"})
+    assert result["ok"] is True
+    assert screen.get_audio(result["payload"]["audio_id"]) == (b"ID3-fake-mp3", "audio/mpeg")
+    assert ex.run("voice.play_url", {})["ok"] is False

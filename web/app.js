@@ -21,6 +21,9 @@ function playAudio(url) {
     soundHint.hidden = false;
   });
 }
+player.addEventListener("play", () => face.classList.add("speaking"));
+player.addEventListener("ended", () => face.classList.remove("speaking"));
+player.addEventListener("pause", () => face.classList.remove("speaking"));
 soundHint.addEventListener("click", () => {
   soundHint.hidden = true;
   if (pendingAudioUrl) playAudio(pendingAudioUrl);

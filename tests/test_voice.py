@@ -28,3 +28,60 @@ def test_ack_body_unwraps_result_shaped_body():
 ])
 def test_ack_body_rejects_unreadable_responses(response):
     assert _ack_body(response) is None
+
+
+# -- dedicated side chat wiring -------------------------------------------------
+
+import asyncio
+
+from webgadget.screen import ScreenState
+from webgadget.voice import VoiceBridge
+
+SID = "gadget-homelink-test"
+
+
+class FakeSession:
+    registered_at = 1.0
+
+    def __init__(self):
+        self.sent = []
+        self.subscribed_with = None
+
+    async def send_chat(self, message, session_id=None, *, output_modality=None):
+        self.sent.append((message, session_id, output_modality))
+        return {"ok": True, "status": 200,
+                "response": {"message_id": "u1", "session_id": SID}}
+
+    async def subscribe_chat(self, session_id=None):
+        self.subscribed_with = session_id
+        events = [
+            {"type": "event", "event": "delta.message_start",
+             "payload": {"session_id": SID, "message_id": "a1", "reply_to_message_id": "u1"}},
+            {"type": "event", "event": "delta.text_append",
+             "payload": {"session_id": SID, "message_id": "a1", "text": "Hello there"}},
+            {"type": "event", "event": "delta.message_done",
+             "payload": {"session_id": SID, "message_id": "a1"}},
+            {"type": "event", "event": "task.status",
+             "payload": {"session_id": SID, "status": "completed", "reply_to_message_id": "u1"}},
+        ]
+        for event in events:
+            yield event
+        await asyncio.sleep(3600)  # stream stays open; the bridge cancels the pump
+
+    async def stream_tts(self, message_id):
+        yield b"fake-mp3"
+
+
+def test_turn_uses_dedicated_side_chat():
+    session = FakeSession()
+    bridge = VoiceBridge(lambda: session, ScreenState(), chat_session_id=SID)
+
+    async def run():
+        return await asyncio.wait_for(bridge.say_text("hi"), 10)
+
+    result = asyncio.run(run())
+    assert result["ok"] is True
+    assert result["reply"] == "Hello there"
+    assert result["audio_id"] is not None
+    assert session.sent == [("hi", SID, "voice")]
+    assert session.subscribed_with == SID
