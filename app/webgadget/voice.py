@@ -25,6 +25,17 @@ log = logging.getLogger(__name__)
 TURN_TIMEOUT_S = 240
 
 
+def _ack_body(response: dict) -> dict | None:
+    """Unwrap a LinkSession chat response to the acknowledgement body.
+
+    ``LinkSession._post_chat`` wraps the decoded body as
+    ``{"ok", "status", "response"}``, while ``MuseTurn.acknowledge``
+    expects the body itself (ids at the top level or under ``result``).
+    """
+    body = response.get("response")
+    return body if isinstance(body, dict) else None
+
+
 class VoiceBridge:
     def __init__(self, session_getter: Callable[[], LinkSession | None], screen: ScreenState) -> None:
         self._session_getter = session_getter
@@ -61,7 +72,10 @@ class VoiceBridge:
                 response = await sender(session)
                 if not response.get("ok"):
                     return {"ok": False, "error": f"Muse rejected the message (HTTP {response.get('status')})"}
-                self._apply(turn.acknowledge(response))
+                body = _ack_body(response)
+                if body is None:
+                    return {"ok": False, "error": "Muse returned an unreadable acknowledgement"}
+                self._apply(turn.acknowledge(body))
                 deadline = time.monotonic() + TURN_TIMEOUT_S
                 while not turn.complete(time.time()):
                     if time.monotonic() > deadline:
