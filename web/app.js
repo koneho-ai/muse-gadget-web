@@ -1,8 +1,11 @@
 "use strict";
-// The device face: an animated Koneho driven by gadget state pushed over
-// /ws. She blinks, twitches her ears, thinks, speaks (her mouth follows
-// the real audio level), hops when a message arrives, and dozes off when
-// idle. Also: TTS playback, WAV mic recording, image frame.
+// The device face: Koneho as a fixed grid of square pixels (48x58). The grid
+// never moves and nothing is transformed -- animation is repainting cell
+// colors from hand-authored frames (window.PIXEL_SPRITE, built by
+// tools/sprite/build_sprite.py). She breathes, blinks, thinks, listens,
+// speaks (mouth frames follow the real audio level), hops when a message
+// arrives, and dozes off when idle. Also: TTS playback, WAV mic recording,
+// image frame.
 
 const $ = (id) => document.getElementById(id);
 const dot = $("dot"), title = $("title"), linkState = $("link-state");
@@ -10,8 +13,7 @@ const koneho = $("koneho"), frame = $("frame"), img = $("stage-image");
 const statusEl = $("status"), bubble = $("bubble"), replyEl = $("reply"), wave = $("wave");
 const player = $("player"), soundHint = $("sound-hint");
 const volumeSlider = $("volume");
-const mouth = document.querySelector(".mouth-open ellipse");
-const tongue = $("tongue");
+const gridEl = $("pixel-grid");
 
 const THINKING = ["thinking", "working", "researching", "planning", "processing",
                   "generating", "executing", "listening"];
@@ -21,37 +23,146 @@ let volume = 0.8;
 let lastReply = "";
 let lastActivity = Date.now();
 let typeTimer = null;
+let speechLevel = 0;
 
-function poke() { lastActivity = Date.now(); koneho.classList.remove("sleepy"); }
+// -- pixel player --------------------------------------------------------------
+
+const SPRITE = window.PIXEL_SPRITE;
+const cells = [];
+let currentCells = null;   // palette index per cell, as currently painted
+
+(function buildGrid() {
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < SPRITE.width * SPRITE.height; i++) {
+    const c = document.createElement("i");
+    frag.appendChild(c);
+    cells.push(c);
+  }
+  gridEl.appendChild(frag);
+})();
+
+function decodeRow(row) {
+  const out = new Array(row.length);
+  for (let i = 0; i < row.length; i++) {
+    const code = row.charCodeAt(i);
+    out[i] = code <= 57 ? code - 48 : code - 87;   // '0'-'9' -> 0-9, 'a'-'f' -> 10-15
+  }
+  return out;
+}
+
+function showFrame(name) {
+  const rows = SPRITE.frames[name];
+  if (!rows) return;
+  for (let y = 0; y < SPRITE.height; y++) {
+    const row = decodeRow(rows[y]);
+    const base = y * SPRITE.width;
+    for (let x = 0; x < SPRITE.width; x++) {
+      const idx = row[x];
+      const pos = base + x;
+      if (currentCells && currentCells[pos] === idx) continue;
+      cells[pos].style.backgroundColor = idx === 0 ? "transparent" : SPRITE.palette[idx];
+    }
+  }
+  currentCells = currentCells || new Array(SPRITE.width * SPRITE.height).fill(-1);
+  for (let y = 0; y < SPRITE.height; y++) {
+    const row = decodeRow(rows[y]);
+    for (let x = 0; x < SPRITE.width; x++) currentCells[y * SPRITE.width + x] = row[x];
+  }
+}
+
+// The player: a mode + a one-shot overlay (hop). Frame changes are driven by
+// per-mode timers; a mode switch takes effect immediately (interruptible,
+// never a restarted timeline).
+let mode = "idle";           // idle | thinking | listening | speaking | sleep
+let overlay = null;          // { frames: [[name, ms]...], i, until }
+let playerTimer = null;
+let idleFlip = false;
+let sleepFlip = 0;
+
+function schedule(fn, ms) {
+  clearTimeout(playerTimer);
+  playerTimer = setTimeout(fn, ms);
+}
+
+function paint(name, next, ms) {
+  showFrame(name);
+  schedule(next, ms);
+}
+
+function tick() {
+  if (overlay) {
+    const [name, ms] = overlay.frames[overlay.i];
+    overlay.i++;
+    if (overlay.i >= overlay.frames.length) overlay = null;
+    paint(name, tick, ms);
+    return;
+  }
+  if (mode === "thinking") {
+    const seq = ["think1", "think2", "think3", "think2"];
+    thinkStep = (thinkStep + 1) % seq.length;
+    paint(seq[thinkStep], tick, thinkStep === 2 ? 520 : 300);
+  } else if (mode === "speaking") {
+    const f = speechLevel > 0.5 ? "talk2" : speechLevel > 0.13 ? "talk1" : "base";
+    paint(f, tick, 90);
+  } else if (mode === "sleep") {
+    const seq = ["sleep0", "sleep1", "sleep2", "sleep1"];
+    sleepFlip = (sleepFlip + 1) % seq.length;
+    paint(seq[sleepFlip], tick, 620);
+  } else if (mode === "listening") {
+    paint("listen", tick, 700);
+  } else {
+    idleFlip = !idleFlip;
+    paint(idleFlip ? "breathe" : "base", tick, 1350);
+  }
+}
+let thinkStep = 0;
+
+function setMode(next) {
+  if (mode === next) return;
+  mode = next;
+  overlay = null;
+  thinkStep = 0;
+  clearTimeout(playerTimer);
+  tick();
+}
+
+function playHop() {
+  overlay = { frames: [["squash", 115], ["air", 105], ["fall", 85],
+                       ["squash_deep", 105], ["base", 200]], i: 0 };
+  clearTimeout(playerTimer);
+  tick();
+}
+
+// blinking: irregular, only in calm modes
+(function blinkLoop() {
+  setTimeout(() => {
+    if ((mode === "idle" || mode === "listening") && !overlay) {
+      const back = mode === "listening" ? "listen" : (idleFlip ? "breathe" : "base");
+      showFrame("blink");
+      schedule(() => { showFrame(back); tick(); }, 120);
+    }
+    blinkLoop();
+  }, 2400 + Math.random() * 3800);
+})();
+
+function currentMode() { return mode; }
+
+// dozing off after 90 s without activity
+setInterval(() => {
+  if (Date.now() - lastActivity > 90000 && mode === "idle") setMode("sleep");
+}, 4000);
+
+function poke() {
+  lastActivity = Date.now();
+  if (mode === "sleep") setMode("idle");
+}
 addEventListener("pointerdown", poke);
 addEventListener("keydown", poke);
 
-// -- idle life: blinking, ear twitches, dozing -------------------------------
+showFrame("base");
+tick();
 
-(function blinkLoop() {
-  setTimeout(() => {
-    koneho.classList.add("blink");
-    setTimeout(() => koneho.classList.remove("blink"), 130);
-    blinkLoop();
-  }, 2200 + Math.random() * 3200);
-})();
-
-(function twitchLoop() {
-  setTimeout(() => {
-    const cls = Math.random() < 0.5 ? "twitch-left" : "twitch-right";
-    koneho.classList.add(cls);
-    setTimeout(() => koneho.classList.remove(cls), 520);
-    twitchLoop();
-  }, 6000 + Math.random() * 6000);
-})();
-
-setInterval(() => {
-  if (Date.now() - lastActivity > 90000 && !koneho.classList.contains("speaking")) {
-    koneho.classList.add("sleepy");
-  }
-}, 5000);
-
-// -- speech: mouth follows the actual audio level ----------------------------
+// -- speech: the mouth follows the actual audio level --------------------------
 
 let audioCtx = null, analyser = null, mouthRaf = 0, flapTimer = 0;
 
@@ -70,50 +181,44 @@ function ensureAnalyser() {
   }
 }
 
-function setMouth(level) {
-  const open = Math.max(0, Math.min(1, level));
-  mouth.setAttribute("ry", (open * 10.5).toFixed(1));
-  tongue.setAttribute("ry", (open * 5).toFixed(1));
-}
-
-function mouthLoop() {
+function levelLoop() {
   const data = new Uint8Array(analyser.fftSize);
   let smooth = 0;
   const step = () => {
-    if (player.paused || player.ended) { setMouth(0); return; }
+    if (player.paused || player.ended) { speechLevel = 0; return; }
     analyser.getByteTimeDomainData(data);
     let sum = 0;
     for (let i = 0; i < data.length; i += 4) { const v = (data[i] - 128) / 128; sum += v * v; }
     const rms = Math.sqrt(sum / (data.length / 4));
     smooth = Math.max(rms * 2.6, smooth * 0.72);
-    setMouth(smooth);
+    speechLevel = smooth;
     mouthRaf = requestAnimationFrame(step);
   };
   step();
 }
 
 function startSpeaking() {
-  koneho.classList.add("speaking");
+  setMode("speaking");
   wave.hidden = false;
   poke();
   if (ensureAnalyser()) {
     audioCtx.resume().catch(() => {});
     cancelAnimationFrame(mouthRaf);
-    mouthLoop();
+    levelLoop();
   } else {
-    // No analyser (autoplay policy): flap the mouth on a timer instead.
+    // No analyser (autoplay policy): flap the level on a timer instead.
     let open = false;
     clearInterval(flapTimer);
-    flapTimer = setInterval(() => { open = !open; setMouth(open ? 0.75 : 0.15); }, 135);
+    flapTimer = setInterval(() => { open = !open; speechLevel = open ? 0.8 : 0.1; }, 135);
   }
 }
 
 function stopSpeaking() {
-  koneho.classList.remove("speaking");
+  if (mode === "speaking") setMode("idle");
   wave.hidden = true;
   cancelAnimationFrame(mouthRaf);
   clearInterval(flapTimer);
-  setMouth(0);
+  speechLevel = 0;
 }
 
 player.addEventListener("play", startSpeaking);
@@ -153,26 +258,20 @@ function revealReply(text) {
   }, 18);
 }
 
-function hop() {
-  koneho.classList.remove("happy");
-  void koneho.offsetWidth;
-  koneho.classList.add("happy");
-  setTimeout(() => koneho.classList.remove("happy"), 1300);
-}
-
 function applyState(s) {
   dot.className = "dot " + (s.link_state || "boot");
   linkState.textContent = s.link_state || "";
   if (s.title) title.textContent = s.title;
   const thinking = THINKING.includes(s.status_text);
-  koneho.classList.toggle("thinking", thinking);
   statusEl.classList.toggle("thinking", thinking);
   statusEl.textContent = s.status_text || "";
   if (s.status_text) poke();
+  if (thinking && mode !== "speaking" && mode !== "listening") setMode("thinking");
+  if (!thinking && mode === "thinking") setMode("idle");
 
   if (s.reply_text !== lastReply) {
     lastReply = s.reply_text || "";
-    if (lastReply) { revealReply(lastReply); hop(); }
+    if (lastReply) { revealReply(lastReply); if (mode !== "speaking") playHop(); }
     else bubble.hidden = true;
   }
 
@@ -232,20 +331,20 @@ async function runTurn(url, options) {
   mic.disabled = true;
   statusEl.textContent = "thinking";
   statusEl.classList.add("thinking");
-  koneho.classList.add("thinking");
+  setMode("thinking");
   try {
     const resp = await fetch(url, options);
     const result = await resp.json().catch(() => ({ ok: false, error: "bad reply" }));
     if (!result.ok) {
       statusEl.textContent = result.error || "something went wrong";
       statusEl.classList.remove("thinking");
-      koneho.classList.remove("thinking");
+      if (mode === "thinking") setMode("idle");
     }
     // The spoken clip + reply text arrive through the state push.
   } catch (err) {
     statusEl.textContent = "could not reach the gadget";
     statusEl.classList.remove("thinking");
-    koneho.classList.remove("thinking");
+    if (mode === "thinking") setMode("idle");
   } finally {
     askButton.disabled = false;
     mic.disabled = false;
@@ -308,14 +407,14 @@ async function startRecording() {
   source.connect(processor); processor.connect(ctx.destination);
   recording = { stream, ctx, processor, source, chunks, rate: ctx.sampleRate };
   mic.classList.add("recording");
-  koneho.classList.add("listening");
+  setMode("listening");
   statusEl.textContent = "listening";
 }
 
 async function stopRecording() {
   const rec = recording; recording = null;
   mic.classList.remove("recording");
-  koneho.classList.remove("listening");
+  if (mode === "listening") setMode("idle");
   rec.processor.disconnect(); rec.source.disconnect();
   rec.stream.getTracks().forEach((t) => t.stop());
   await rec.ctx.close();
@@ -331,6 +430,6 @@ mic.addEventListener("click", async () => {
     else await startRecording();
   } catch (err) {
     statusEl.textContent = "microphone unavailable";
-    koneho.classList.remove("listening");
+    if (mode === "listening") setMode("idle");
   }
 });
