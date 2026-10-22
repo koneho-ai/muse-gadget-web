@@ -8,6 +8,7 @@ One port serves everything:
   POST /say           {message} -> a spoken-reply turn
   POST /voice         raw WAV body -> a spoken-reply turn
   POST /volume        {volume} -> set speaker volume
+  POST /face          back to the character (clears a drawn image)
   GET  /pairing/ws    BLE relay endpoint (see pairing_ws.py)
   GET  /healthz       liveness + link state
 """
@@ -73,6 +74,7 @@ class WebGadgetServer:
         routes.add_post("/say", self._say)
         routes.add_post("/voice", self._voice)
         routes.add_post("/volume", self._volume)
+        routes.add_post("/face", self._face)
         routes.add_get("/pairing/ws", self._pairing_ws)
         routes.add_get("/healthz", self._healthz)
         routes.add_static("/static/", find_web_dir(), show_index=False)
@@ -154,6 +156,10 @@ class WebGadgetServer:
         except ConnectionError as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=503)
         return web.json_response(result)
+
+    async def _face(self, request: web.Request) -> web.Response:
+        self.screen.show_animation()
+        return web.json_response({"ok": True})
 
     async def _volume(self, request: web.Request) -> web.Response:
         try:

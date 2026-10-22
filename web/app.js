@@ -1,17 +1,124 @@
 "use strict";
-// The device face: renders gadget state pushed over /ws, plays TTS reply
-// clips, and records WAV voice notes for the mic button.
+// The device face: an animated Koneho driven by gadget state pushed over
+// /ws. She blinks, twitches her ears, thinks, speaks (her mouth follows
+// the real audio level), hops when a message arrives, and dozes off when
+// idle. Also: TTS playback, WAV mic recording, image frame.
 
 const $ = (id) => document.getElementById(id);
 const dot = $("dot"), title = $("title"), linkState = $("link-state");
-const face = $("face"), img = $("stage-image");
-const statusEl = $("status"), replyEl = $("reply");
+const koneho = $("koneho"), frame = $("frame"), img = $("stage-image");
+const statusEl = $("status"), bubble = $("bubble"), replyEl = $("reply"), wave = $("wave");
 const player = $("player"), soundHint = $("sound-hint");
 const volumeSlider = $("volume");
+const mouth = document.querySelector(".mouth-open ellipse");
+const tongue = $("tongue");
 
+const THINKING = ["thinking", "working", "researching", "planning", "processing",
+                  "generating", "executing", "listening"];
 let lastAudioId = null;
 let pendingAudioUrl = null;
 let volume = 0.8;
+let lastReply = "";
+let lastActivity = Date.now();
+let typeTimer = null;
+
+function poke() { lastActivity = Date.now(); koneho.classList.remove("sleepy"); }
+addEventListener("pointerdown", poke);
+addEventListener("keydown", poke);
+
+// -- idle life: blinking, ear twitches, dozing -------------------------------
+
+(function blinkLoop() {
+  setTimeout(() => {
+    koneho.classList.add("blink");
+    setTimeout(() => koneho.classList.remove("blink"), 130);
+    blinkLoop();
+  }, 2200 + Math.random() * 3200);
+})();
+
+(function twitchLoop() {
+  setTimeout(() => {
+    const cls = Math.random() < 0.5 ? "twitch-left" : "twitch-right";
+    koneho.classList.add(cls);
+    setTimeout(() => koneho.classList.remove(cls), 520);
+    twitchLoop();
+  }, 6000 + Math.random() * 6000);
+})();
+
+setInterval(() => {
+  if (Date.now() - lastActivity > 90000 && !koneho.classList.contains("speaking")) {
+    koneho.classList.add("sleepy");
+  }
+}, 5000);
+
+// -- speech: mouth follows the actual audio level ----------------------------
+
+let audioCtx = null, analyser = null, mouthRaf = 0, flapTimer = 0;
+
+function ensureAnalyser() {
+  if (analyser) return true;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaElementSource(player);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    src.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function setMouth(level) {
+  const open = Math.max(0, Math.min(1, level));
+  mouth.setAttribute("ry", (open * 10.5).toFixed(1));
+  tongue.setAttribute("ry", (open * 5).toFixed(1));
+}
+
+function mouthLoop() {
+  const data = new Uint8Array(analyser.fftSize);
+  let smooth = 0;
+  const step = () => {
+    if (player.paused || player.ended) { setMouth(0); return; }
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 4) { const v = (data[i] - 128) / 128; sum += v * v; }
+    const rms = Math.sqrt(sum / (data.length / 4));
+    smooth = Math.max(rms * 2.6, smooth * 0.72);
+    setMouth(smooth);
+    mouthRaf = requestAnimationFrame(step);
+  };
+  step();
+}
+
+function startSpeaking() {
+  koneho.classList.add("speaking");
+  wave.hidden = false;
+  poke();
+  if (ensureAnalyser()) {
+    audioCtx.resume().catch(() => {});
+    cancelAnimationFrame(mouthRaf);
+    mouthLoop();
+  } else {
+    // No analyser (autoplay policy): flap the mouth on a timer instead.
+    let open = false;
+    clearInterval(flapTimer);
+    flapTimer = setInterval(() => { open = !open; setMouth(open ? 0.75 : 0.15); }, 135);
+  }
+}
+
+function stopSpeaking() {
+  koneho.classList.remove("speaking");
+  wave.hidden = true;
+  cancelAnimationFrame(mouthRaf);
+  clearInterval(flapTimer);
+  setMouth(0);
+}
+
+player.addEventListener("play", startSpeaking);
+player.addEventListener("ended", stopSpeaking);
+player.addEventListener("pause", stopSpeaking);
 
 function playAudio(url) {
   player.src = url;
@@ -21,31 +128,64 @@ function playAudio(url) {
     soundHint.hidden = false;
   });
 }
-player.addEventListener("play", () => face.classList.add("speaking"));
-player.addEventListener("ended", () => face.classList.remove("speaking"));
-player.addEventListener("pause", () => face.classList.remove("speaking"));
 soundHint.addEventListener("click", () => {
   soundHint.hidden = true;
   if (pendingAudioUrl) playAudio(pendingAudioUrl);
 });
 
+// -- state from the gadget -----------------------------------------------------
+
+function revealReply(text) {
+  bubble.hidden = false;
+  if (typeTimer) clearInterval(typeTimer);
+  if (text.length <= 3) { replyEl.textContent = text; return; }
+  replyEl.textContent = "";
+  replyEl.classList.add("typing");
+  const step = Math.max(1, Math.round(text.length / 42));
+  let i = 0;
+  typeTimer = setInterval(() => {
+    i = Math.min(text.length, i + step);
+    replyEl.textContent = text.slice(0, i);
+    if (i >= text.length) {
+      clearInterval(typeTimer);
+      replyEl.classList.remove("typing");
+    }
+  }, 18);
+}
+
+function hop() {
+  koneho.classList.remove("happy");
+  void koneho.offsetWidth;
+  koneho.classList.add("happy");
+  setTimeout(() => koneho.classList.remove("happy"), 1300);
+}
+
 function applyState(s) {
   dot.className = "dot " + (s.link_state || "boot");
   linkState.textContent = s.link_state || "";
   if (s.title) title.textContent = s.title;
-  const thinking = ["thinking", "working", "researching", "planning", "processing", "generating", "executing", "listening"].includes(s.status_text);
-  face.classList.toggle("thinking", thinking);
+  const thinking = THINKING.includes(s.status_text);
+  koneho.classList.toggle("thinking", thinking);
+  statusEl.classList.toggle("thinking", thinking);
   statusEl.textContent = s.status_text || "";
-  replyEl.textContent = s.reply_text || "";
+  if (s.status_text) poke();
+
+  if (s.reply_text !== lastReply) {
+    lastReply = s.reply_text || "";
+    if (lastReply) { revealReply(lastReply); hop(); }
+    else bubble.hidden = true;
+  }
+
   if (s.mode === "image") {
-    face.hidden = true;
-    img.hidden = false;
+    frame.hidden = false;
+    koneho.classList.add("behind");
     const want = "/img/current?v=" + s.image_version;
     if (img.getAttribute("src") !== want) img.src = want;
   } else {
-    img.hidden = true;
-    face.hidden = false;
+    frame.hidden = true;
+    koneho.classList.remove("behind");
   }
+
   if (typeof s.volume === "number") {
     volume = s.volume / 100;
     if (document.activeElement !== volumeSlider) volumeSlider.value = s.volume;
@@ -56,6 +196,10 @@ function applyState(s) {
     playAudio("/audio/" + s.audio_id);
   }
 }
+
+$("frame-close").addEventListener("click", () => {
+  fetch("/face", { method: "POST" }).catch(() => {});
+});
 
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -81,18 +225,27 @@ volumeSlider.addEventListener("change", () => {
 // -- Ask by text ---------------------------------------------------------------
 
 const askForm = $("ask-form"), askInput = $("ask-input"), askButton = $("ask-button");
+const mic = $("mic");
 
 async function runTurn(url, options) {
   askButton.disabled = true;
   mic.disabled = true;
   statusEl.textContent = "thinking";
+  statusEl.classList.add("thinking");
+  koneho.classList.add("thinking");
   try {
     const resp = await fetch(url, options);
     const result = await resp.json().catch(() => ({ ok: false, error: "bad reply" }));
-    if (!result.ok) statusEl.textContent = result.error || "something went wrong";
+    if (!result.ok) {
+      statusEl.textContent = result.error || "something went wrong";
+      statusEl.classList.remove("thinking");
+      koneho.classList.remove("thinking");
+    }
     // The spoken clip + reply text arrive through the state push.
   } catch (err) {
     statusEl.textContent = "could not reach the gadget";
+    statusEl.classList.remove("thinking");
+    koneho.classList.remove("thinking");
   } finally {
     askButton.disabled = false;
     mic.disabled = false;
@@ -112,7 +265,6 @@ askForm.addEventListener("submit", (ev) => {
 
 // -- Mic: record PCM in the browser, ship a 16 kHz mono WAV -------------------
 
-const mic = $("mic");
 let recording = null;
 
 function encodeWav(samples, sampleRate) {
@@ -156,16 +308,19 @@ async function startRecording() {
   source.connect(processor); processor.connect(ctx.destination);
   recording = { stream, ctx, processor, source, chunks, rate: ctx.sampleRate };
   mic.classList.add("recording");
+  koneho.classList.add("listening");
+  statusEl.textContent = "listening";
 }
 
 async function stopRecording() {
   const rec = recording; recording = null;
   mic.classList.remove("recording");
+  koneho.classList.remove("listening");
   rec.processor.disconnect(); rec.source.disconnect();
   rec.stream.getTracks().forEach((t) => t.stop());
   await rec.ctx.close();
   const samples = downsample(rec.chunks, rec.rate, 16000);
-  if (samples.length < 1600) return;   // accidental tap: <100 ms of audio
+  if (samples.length < 1600) { statusEl.textContent = ""; return; }   // accidental tap
   const wav = encodeWav(samples, 16000);
   runTurn("/voice", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav });
 }
@@ -176,5 +331,6 @@ mic.addEventListener("click", async () => {
     else await startRecording();
   } catch (err) {
     statusEl.textContent = "microphone unavailable";
+    koneho.classList.remove("listening");
   }
 });

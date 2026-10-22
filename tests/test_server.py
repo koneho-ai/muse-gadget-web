@@ -41,7 +41,20 @@ def server_url(tmp_path, monkeypatch):
 
     thread = threading.Thread(target=run_loop, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{port}"
+    url = f"http://127.0.0.1:{port}"
+    # Wait until the site actually accepts connections; yielding earlier
+    # made these tests flaky (~1 in 3 runs lost the startup race).
+    import time
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            with urllib.request.urlopen(url + "/healthz", timeout=1):
+                break
+        except Exception:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.05)
+    yield url
     loop.call_soon_threadsafe(loop.stop)
 
 
@@ -59,6 +72,13 @@ def test_face_and_healthz(server_url):
     status, body = get(server_url + "/")
     assert status == 200
     assert b"Muse Gadget" in body
+
+
+def test_face_endpoint(server_url):
+    req = urllib.request.Request(server_url + "/face", method="POST", data=b"")
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        assert resp.status == 200
+        assert json.loads(resp.read())["ok"] is True
 
 
 def test_say_without_link_is_503(server_url):
