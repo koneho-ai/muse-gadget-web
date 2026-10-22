@@ -37,7 +37,7 @@ import asyncio
 from webgadget.screen import ScreenState
 from webgadget.voice import VoiceBridge
 
-SID = "gadget-homelink-test"
+SID = "3f6f1b2c-0000-5000-8000-000000000001"  # UUID-shaped, like real chat ids
 
 
 class FakeSession:

@@ -76,11 +76,15 @@ async def amain() -> None:
         sdk_token=_sdk_token(),
         display_name=display_name,
     )
-    # All gadget chat goes to one dedicated side chat, named after the
-    # node so it is stable across restarts and state wipes.
+    # All gadget chat goes to one dedicated side chat. The id is a
+    # deterministic UUIDv5 of the node id — chat ids in this system are
+    # UUIDs (a slug id is rejected with HTTP 400) — so the same side
+    # chat is reused across restarts and state wipes.
+    import uuid
+
     voice = VoiceBridge(
         lambda: service.current_session, screen,
-        chat_session_id=f"gadget-{ident.node_id}",
+        chat_session_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"muse-gadget:{ident.node_id}")),
     )
     server = WebGadgetServer(
         screen=screen, executor=executor, voice=voice, identity=ident, port=port,

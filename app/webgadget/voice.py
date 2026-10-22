@@ -36,6 +36,24 @@ def _ack_body(response: dict) -> dict | None:
     return body if isinstance(body, dict) else None
 
 
+def _error_detail(response: dict) -> str:
+    """Best-effort human-readable reason from a rejected chat response."""
+    body = response.get("response")
+    if isinstance(body, dict):
+        for key in ("error", "message", "detail"):
+            value = body.get(key)
+            if isinstance(value, str) and value:
+                return value[:200]
+            if isinstance(value, dict):
+                inner = value.get("message") or value.get("error")
+                if isinstance(inner, str) and inner:
+                    return inner[:200]
+        return ""
+    if isinstance(body, str):
+        return body[:200]
+    return ""
+
+
 class VoiceBridge:
     def __init__(self, session_getter: Callable[[], LinkSession | None], screen: ScreenState,
                  chat_session_id: str | None = None) -> None:
@@ -75,7 +93,13 @@ class VoiceBridge:
             try:
                 response = await sender(session)
                 if not response.get("ok"):
-                    return {"ok": False, "error": f"Muse rejected the message (HTTP {response.get('status')})"}
+                    detail = _error_detail(response)
+                    log.warning("Muse rejected the message (HTTP %s): %s",
+                                response.get("status"), detail or "no detail")
+                    error = f"Muse rejected the message (HTTP {response.get('status')})"
+                    if detail:
+                        error += f": {detail}"
+                    return {"ok": False, "error": error}
                 body = _ack_body(response)
                 if body is None:
                     return {"ok": False, "error": "Muse returned an unreadable acknowledgement"}
