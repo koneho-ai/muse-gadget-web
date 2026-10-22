@@ -1,0 +1,41 @@
+# muse-gadget-web — runtime + one-shot pairing (Linux Docker hosts with BT).
+#
+#   cp .env.example .env   # fill in the SDK token (and a relay secret)
+#   docker compose --profile pair up pair   # once, with the Muse app
+#   docker compose up -d gadget             # then run forever
+#
+# Pairing alternatives that need no Bluetooth on this host at all —
+# pair-on-host and the BLE relay — are in docs/bluetooth.md.
+# Pairing state (identity.json + pairing.json) lives in the state volume;
+# back it up and the gadget can move hosts without re-pairing.
+
+services:
+  gadget:
+    build: .
+    image: muse-gadget-web:local
+    container_name: muse-gadget-web
+    restart: unless-stopped
+    environment:
+      MUSEGADGET_SDK_TOKEN: ${MUSEGADGET_SDK_TOKEN:-}
+      PAIRING_RELAY_SECRET: ${PAIRING_RELAY_SECRET:-}
+      DISPLAY_NAME: ${DISPLAY_NAME:-Muse Gadget (Web)}
+      WEB_PORT: "8321"
+    ports:
+      # The face (screen/speaker/mic) — publish on a trusted LAN/tailnet.
+      - "8321:8321"
+    volumes:
+      - gadget-state:/state
+
+  pair:
+    image: muse-gadget-web:local
+    profiles: ["pair"]
+    environment:
+      MUSEGADGET_SDK_TOKEN: ${MUSEGADGET_SDK_TOKEN:-}
+      DBUS_SYSTEM_BUS_ADDRESS: unix:path=/run/dbus/system_bus_socket
+    volumes:
+      - gadget-state:/state
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+    entrypoint: ["/opt/venv/bin/python", "-m", "webgadget.pair_cli"]
+
+volumes:
+  gadget-state:

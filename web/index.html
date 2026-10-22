@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Muse Gadget (Web)</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <span id="dot" class="dot boot"></span>
+    <span id="title">Muse Gadget</span>
+    <span id="link-state" class="link-state">starting</span>
+  </header>
+
+  <main id="stage">
+    <div id="face" aria-hidden="true">
+      <div class="eye left"></div>
+      <div class="eye right"></div>
+      <div class="mouth"></div>
+    </div>
+    <img id="stage-image" alt="Image sent to this gadget" hidden>
+    <div id="status" class="status"></div>
+    <div id="reply" class="reply"></div>
+  </main>
+
+  <footer>
+    <form id="ask-form">
+      <input id="ask-input" type="text" placeholder="Ask Muse…" autocomplete="off">
+      <button type="submit" id="ask-button">Ask</button>
+    </form>
+    <button id="mic" title="Hold or click to talk">🎤</button>
+    <label class="volume">🔊 <input id="volume" type="range" min="0" max="100" value="80"></label>
+    <button id="sound-hint" hidden>Tap to enable sound</button>
+  </footer>
+
+  <audio id="player" preload="auto"></audio>
+  <script src="/static/app.js"></script>
+</body>
+</html>
